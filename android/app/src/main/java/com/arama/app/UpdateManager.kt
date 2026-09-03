@@ -64,25 +64,32 @@ class UpdateManager(private val activity: Activity) {
                 var downloading = true
                 while (downloading) {
                     Thread.sleep(700)
-                    val cursor = manager.query(DownloadManager.Query().setFilterById(id)) ?: continue
+                    val cursor = manager.query(DownloadManager.Query().setFilterById(id))
+                    if (cursor == null) {
+                        continue
+                    }
                     cursor.use {
-                        if (!it.moveToFirst()) continue
+                        if (!it.moveToFirst()) {
+                            continue
+                        }
                         val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                            downloading = false
-                            val uri = manager.getUriForDownloadedFile(id) ?: return@execute
-                            if (expectedSha256.isNotBlank()) {
-                                val path = it.getString(it.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))
-                                if (!verifySha256(uri, expectedSha256)) {
+                        when (status) {
+                            DownloadManager.STATUS_SUCCESSFUL -> {
+                                downloading = false
+                                val uri = manager.getUriForDownloadedFile(id)
+                                if (uri == null) {
+                                    activity.runOnUiThread { Toast.makeText(activity, "Güncelleme dosyası bulunamadı.", Toast.LENGTH_LONG).show() }
+                                } else if (expectedSha256.isNotBlank() && !verifySha256(uri, expectedSha256)) {
                                     manager.remove(id)
                                     activity.runOnUiThread { Toast.makeText(activity, "Güncelleme doğrulanamadı.", Toast.LENGTH_LONG).show() }
-                                    return@execute
+                                } else {
+                                    activity.runOnUiThread { install(uri) }
                                 }
                             }
-                            activity.runOnUiThread { install(uri) }
-                        } else if (status == DownloadManager.STATUS_FAILED) {
-                            downloading = false
-                            activity.runOnUiThread { Toast.makeText(activity, "Güncelleme indirilemedi.", Toast.LENGTH_LONG).show() }
+                            DownloadManager.STATUS_FAILED -> {
+                                downloading = false
+                                activity.runOnUiThread { Toast.makeText(activity, "Güncelleme indirilemedi.", Toast.LENGTH_LONG).show() }
+                            }
                         }
                     }
                 }
