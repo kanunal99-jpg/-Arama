@@ -56,12 +56,20 @@ class MainActivity : Activity() {
             setOnClickListener { subtitle.text = "İş keşif ekranı bir sonraki geliştirme aşamasında aktifleşecek." }
         }
 
+        val updateButton = Button(this).apply {
+            text = "Güncellemeleri Kontrol Et"
+            isAllCaps = false
+            setOnClickListener { UpdateManager(this@MainActivity).checkForUpdate() }
+        }
+
         root.addView(brand, LinearLayout.LayoutParams(-1, -2))
         root.addView(title, LinearLayout.LayoutParams(-1, -2))
         root.addView(subtitle, LinearLayout.LayoutParams(-1, -2))
         root.addView(cvButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 32 })
         root.addView(jobsButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
+        root.addView(updateButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
 
         setContentView(root)
+        UpdateManager(this).checkForUpdate()
     }
 }
