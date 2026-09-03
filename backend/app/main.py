@@ -1,9 +1,19 @@
 from fastapi import FastAPI
-from app.api.routes import health, users, cvs, jobs, matches
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.routes import health, users, cvs, jobs, matches, applications, salaries, ai
 
-app = FastAPI(title="Arama API", version="0.1.0")
-app.include_router(health.router, prefix="/api/v1")
-app.include_router(users.router, prefix="/api/v1")
-app.include_router(cvs.router, prefix="/api/v1")
-app.include_router(jobs.router, prefix="/api/v1")
-app.include_router(matches.router, prefix="/api/v1")
+app = FastAPI(title="Arama API", version="0.2.0", description="AI Career Intelligence Platform API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+for router in (health.router, users.router, cvs.router, jobs.router, matches.router, applications.router, salaries.router, ai.router):
+    app.include_router(router, prefix="/api/v1")
+
+@app.get("/")
+def root():
+    return {"name": "Arama API", "version": "0.2.0", "status": "ok"}
