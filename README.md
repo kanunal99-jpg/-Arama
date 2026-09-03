@@ -62,3 +62,5 @@ docs/             product and technical documentation
 ## Status
 
 🚧 Active development — Foundation phase.
+
+<!-- android-release-trigger: 2026-09-03 -->
