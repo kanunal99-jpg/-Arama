@@ -82,8 +82,6 @@ jobs:
         id: read-version
         shell: bash
         run: |
-          VERSION_CODE=$(grep -o 'versionCode = [0-9]*' app/build.gradle.kts | grep -o '[0-9]*' || true)
-          VERSION_NAME=$(grep -o 'versionName = "[^"]*"' app/build.gradle.kts | cut -d'"' -f2 || true)
           echo "version_code=${{ steps.version.outputs.version_code }}" >> "$GITHUB_OUTPUT"
           echo "version_name=${{ steps.version.outputs.version_name }}" >> "$GITHUB_OUTPUT"
 
@@ -97,6 +95,12 @@ jobs:
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
           echo "APK SHA-256: $SHA256"
 
+      - name: Prepare release asset
+        shell: bash
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/arama-release.apk
+          test -s app/build/outputs/apk/release/arama-release.apk
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         env:
@@ -106,7 +110,7 @@ jobs:
           name: ARAMA Android v${{ steps.version.outputs.version_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: android/app/build/outputs/apk/release/app-release.apk
+          files: android/app/build/outputs/apk/release/arama-release.apk
 
       - name: Verify published release asset hash
         shell: bash
