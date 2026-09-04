@@ -5,7 +5,6 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Environment
 import android.provider.Settings
 import android.util.Base64
 import android.widget.Toast
@@ -83,16 +82,22 @@ class UpdateManager(private val activity: Activity) {
                 return
             }
 
+            // Do not force a private destination here. DownloadManager's managed URI is
+            // readable by the package installer through FLAG_GRANT_READ_URI_PERMISSION and
+            // avoids destination/storage failures on Android 10+.
             val request = DownloadManager.Request(Uri.parse(apkUrl))
                 .setTitle("Arama güncellemesi")
                 .setDescription("Yeni sürüm indiriliyor…")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalFilesDir(activity, Environment.DIRECTORY_DOWNLOADS, "arama-update.apk")
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(false)
                 .setMimeType("application/vnd.android.package-archive")
 
             val manager = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val id = manager.enqueue(request)
-            Toast.makeText(activity, "Arama güncellemesi indiriliyor…", Toast.LENGTH_SHORT).show()
+            activity.runOnUiThread {
+                Toast.makeText(activity, "Arama güncellemesi indiriliyor…", Toast.LENGTH_SHORT).show()
+            }
 
             val observer = Executors.newSingleThreadExecutor()
             observer.execute {
@@ -103,9 +108,12 @@ class UpdateManager(private val activity: Activity) {
                     if (cursor != null) {
                         var hasRow = false
                         var status = DownloadManager.STATUS_PENDING
+                        var reason = 0
                         if (cursor.moveToFirst()) {
                             hasRow = true
                             status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                            val reasonIndex = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
+                            if (reasonIndex >= 0) reason = cursor.getInt(reasonIndex)
                         }
                         cursor.close()
                         if (hasRow) {
@@ -125,7 +133,7 @@ class UpdateManager(private val activity: Activity) {
                                 DownloadManager.STATUS_FAILED -> {
                                     downloading = false
                                     activity.runOnUiThread {
-                                        Toast.makeText(activity, "Güncelleme indirilemedi. APK sayfası açılıyor…", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(activity, "Güncelleme indirilemedi (hata $reason). APK sayfası açılıyor…", Toast.LENGTH_LONG).show()
                                         openApkUrl(apkUrl)
                                     }
                                 }
