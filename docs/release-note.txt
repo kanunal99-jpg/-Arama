@@ -1,0 +1,1 @@
+Feature releases are validated on a live Android device before the next feature begins.
