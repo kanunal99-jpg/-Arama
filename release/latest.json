@@ -1,8 +1,8 @@
 {
-  "versionCode": 100045,
-  "versionName": "0.1.45",
-  "apkUrl": "https://github.com/kanunal99-jpg/-Arama/releases/download/android-v0.1.45-100045/arama-release.apk",
-  "sha256": "8bdcf47db99f13e134d55168696e58068437b1a5b7677377d62c20e016909e32",
+  "versionCode": 100046,
+  "versionName": "0.1.46",
+  "apkUrl": "https://github.com/kanunal99-jpg/-Arama/releases/download/android-v0.1.46-100046/arama-release.apk",
+  "sha256": "87543584228fed6bcc778a106c9c98d5058f01b2cbdad048703d061f8f69d5bc",
   "mandatory": false,
   "releaseNotes": "ARAMA Android otomatik OTA sürümü"
 }
