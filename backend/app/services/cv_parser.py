@@ -68,6 +68,11 @@ def _first_match(pattern: str, text: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _is_section_header(line: str, aliases: list[str]) -> bool:
+    normalized = line.strip().lower().rstrip(":").strip()
+    return any(normalized == alias or normalized.startswith(alias + " ") for alias in aliases)
+
+
 def parse_cv(filename: str, data: bytes) -> dict:
     if not data:
         raise ValueError("CV dosyası boş.")
@@ -96,22 +101,60 @@ def parse_cv(filename: str, data: bytes) -> dict:
             skills.append(canonical)
 
     section_names = {
-        "experience": ["experience", "work experience", "iş deneyimi", "deneyim"],
-        "education": ["education", "eğitim"],
-        "skills": ["skills", "yetenekler", "beceriler"],
+        "experience": [
+            "experience",
+            "work experience",
+            "iş deneyimi",
+            "deneyim",
+            "mesleki deneyim",
+        ],
+        "education": [
+            "education",
+            "eğitim",
+            "eğitim bilgileri",
+        ],
+        "skills": [
+            "skills",
+            "yetenekler",
+            "beceriler",
+            "yetkinlikler",
+        ],
     }
+    boundary_sections = {
+        **section_names,
+        "references": ["references", "referanslar"],
+    }
+
     sections = {}
-    lower_lines = [line.lower() for line in lines]
+    lower_lines = [line.lower().strip() for line in lines]
     for key, aliases in section_names.items():
-        indexes = [i for i, line in enumerate(lower_lines) if any(line == alias or line.startswith(alias + ":") for alias in aliases)]
-        if indexes:
-            start = indexes[0] + 1
-            end = len(lines)
-            for i in range(start, len(lines)):
-                if any(lower_lines[i] == alias for values in section_names.values() for alias in values):
-                    end = i
-                    break
-            sections[key] = lines[start:end][:30]
+        indexes = [
+            i for i, line in enumerate(lower_lines)
+            if _is_section_header(line, aliases)
+        ]
+        if not indexes:
+            continue
+
+        start = indexes[0] + 1
+        end = len(lines)
+        for i in range(start, len(lines)):
+            if any(_is_section_header(lower_lines[i], values) for values in boundary_sections.values()):
+                end = i
+                break
+
+        content = lines[start:end][:50]
+        sections[key] = content
+
+        # Turkish CVs commonly use a dedicated YETKİNLİKLER section with
+        # human-readable skills that are not present in the English alias map.
+        if key == "skills":
+            section_skills = []
+            for item in content:
+                cleaned = re.sub(r"^[•●▪◦*-]+\s*", "", item).strip()
+                if cleaned and cleaned not in section_skills:
+                    section_skills.append(cleaned)
+            if section_skills:
+                skills = section_skills
 
     return {
         "filename": filename,
