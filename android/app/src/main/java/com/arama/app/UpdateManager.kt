@@ -1,10 +1,12 @@
 package com.arama.app
 
 import android.app.Activity
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import java.io.File
 import java.io.FileOutputStream
@@ -16,6 +18,7 @@ import org.json.JSONObject
 
 class UpdateManager(private val activity: Activity) {
     companion object {
+        private const val TAG = "AramaOTA"
         private const val RAW_MANIFEST_URL = "https://raw.githubusercontent.com/kanunal99-jpg/-Arama/main/release/latest.json"
         private const val API_MANIFEST_URL = "https://api.github.com/repos/kanunal99-jpg/-Arama/contents/release/latest.json?ref=main"
     }
@@ -145,6 +148,8 @@ class UpdateManager(private val activity: Activity) {
     }
 
     private fun installWithPackageInstaller(apkFile: File) {
+        var sessionId = -1
+        var committed = false
         try {
             val packageInstaller = activity.packageManager.packageInstaller
             val params = android.content.pm.PackageInstaller.SessionParams(
@@ -152,7 +157,7 @@ class UpdateManager(private val activity: Activity) {
             ).apply {
                 setAppPackageName(activity.packageName)
             }
-            val sessionId = packageInstaller.createSession(params)
+            sessionId = packageInstaller.createSession(params)
             packageInstaller.openSession(sessionId).use { session ->
                 apkFile.inputStream().use { input ->
                     session.openWrite("base.apk", 0, apkFile.length()).use { output ->
@@ -160,20 +165,52 @@ class UpdateManager(private val activity: Activity) {
                         session.fsync(output)
                     }
                 }
-                session.commit(
-                    android.app.PendingIntent.getBroadcast(
-                        activity,
-                        sessionId,
-                        Intent(activity, OtaInstallReceiver::class.java).setData(Uri.parse("package:${activity.packageName}")),
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-                    ).intentSender
+
+                val callbackIntent = Intent(activity, OtaInstallReceiver::class.java)
+                    .setPackage(activity.packageName)
+                    .addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+
+                // PackageInstaller fills the callback Intent with EXTRA_STATUS and
+                // EXTRA_INTENT when user approval is required. Android/AOSP uses a
+                // mutable PendingIntent for this callback on modern Android.
+                val pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        PendingIntent.FLAG_MUTABLE
+                    } else {
+                        0
+                    }
+
+                val pendingIntent = PendingIntent.getBroadcast(
+                    activity,
+                    sessionId,
+                    callbackIntent,
+                    pendingIntentFlags
                 )
+
+                session.commit(pendingIntent.intentSender)
+                committed = true
             }
-            Toast.makeText(activity, "Güncelleme doğrulandı. Android yükleyicisi açılıyor…", Toast.LENGTH_LONG).show()
+
+            Toast.makeText(activity, "Güncelleme kurulumu başlatıldı. Android onayı bekleniyor…", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            Toast.makeText(activity, "Güncelleme kurulumu başlatılamadı: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            Log.e(TAG, "PackageInstaller kurulumu başlatamadı. sessionId=$sessionId", e)
+            if (sessionId != -1 && !committed) {
+                try {
+                    packageInstallerForCleanup().abandonSession(sessionId)
+                } catch (_: Exception) {
+                    // Best effort cleanup only.
+                }
+            }
+            Toast.makeText(
+                activity,
+                "Güncelleme kurulumu başlatılamadı: ${e.javaClass.simpleName}: ${e.message ?: "ayrıntı yok"}",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
+
+    private fun packageInstallerForCleanup(): android.content.pm.PackageInstaller =
+        activity.packageManager.packageInstaller
 
     private fun openApkUrl(apkUrl: String) {
         try {
