@@ -1,10 +1,10 @@
 {
-  "versionCode": 100051,
-  "versionName": "0.1.51",
+  "versionCode": 100052,
+  "versionName": "0.1.52",
   "packageName": "com.arama.app",
-  "apkUrl": "https://github.com/kanunal99-jpg/-Arama/releases/download/android-v0.1.51-100051/arama-release.apk",
-  "sha256": "4faf5bba45b55fea6ffb668a354e1d3124c6ed422e29f33d21373f0187cb15c2",
-  "sizeBytes": 638545,
+  "apkUrl": "https://github.com/kanunal99-jpg/-Arama/releases/download/android-v0.1.52-100052/arama-release.apk",
+  "sha256": "2e9c4382647248d42c3c8a9714c14f2e3c1b4675380d09e3d661fff579663d03",
+  "sizeBytes": 638549,
   "mandatory": false,
   "releaseNotes": "ARAMA Android otomatik OTA sürümü"
 }
