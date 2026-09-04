@@ -7,12 +7,18 @@ android {
     namespace = "com.arama.app"
     compileSdk = 35
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
         applicationId = "com.arama.app"
         minSdk = 26
         targetSdk = 35
         versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
         versionName = (project.findProperty("versionName") as String?) ?: "0.1.0"
+        val apiBaseUrl = (project.findProperty("apiBaseUrl") as String?)?.trim()?.trimEnd('/') ?: ""
+        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
     }
 
     signingConfigs {
