@@ -1,6 +1,6 @@
 name: Android APK & OTA Release
 
-# Release pipeline trigger: rebuild after OTA DownloadManager managed-URI fix.
+# Release pipeline trigger: hardened binary/release validation.
 on:
   push:
     branches: [main]
@@ -86,35 +86,51 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle :app:assembleRelease --no-daemon -PversionCode=${{ steps.version.outputs.version_code }} -PversionName=${{ steps.version.outputs.version_name }} -PapiBaseUrl="$ARAMA_API_BASE_URL"
 
-      - name: Verify APK exists and is signed
+      - name: Validate APK binary, package, version, alignment and signature
+        id: validate
         shell: bash
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
-          APKSIGNER="$(command -v apksigner || true)"
-          if [ -z "$APKSIGNER" ]; then
-            APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -n 1)"
-          fi
+
+          echo "== File =="
+          stat -c 'APK bytes: %s' "$APK"
+
+          echo "== ZIP integrity =="
+          unzip -t "$APK" >/dev/null
+          echo "APK ZIP integrity: OK"
+
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 2>/dev/null | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -n 1)"
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign 2>/dev/null | sort -V | tail -n 1)"
+          test -x "$AAPT2"
           test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose "$APK"
-          echo "Signed release APK verified with apksigner."
+          test -x "$ZIPALIGN"
 
-      - name: Read Android version
-        id: read-version
-        shell: bash
-        run: |
-          echo "version_code=${{ steps.version.outputs.version_code }}" >> "$GITHUB_OUTPUT"
-          echo "version_name=${{ steps.version.outputs.version_name }}" >> "$GITHUB_OUTPUT"
+          echo "== APK metadata =="
+          BADGING="$($AAPT2 dump badging "$APK")"
+          echo "$BADGING"
+          echo "$BADGING" | grep -F "package: name='com.arama.app'" >/dev/null
+          echo "$BADGING" | grep -F "versionCode='${{ steps.version.outputs.version_code }}'" >/dev/null
+          echo "$BADGING" | grep -F "versionName='${{ steps.version.outputs.version_name }}'" >/dev/null
+          echo "Package/version validation: OK"
 
-      - name: Calculate SHA-256
-        id: hash
-        shell: bash
-        run: |
-          APK="app/build/outputs/apk/release/app-release.apk"
-          SHA256=$(sha256sum "$APK" | cut -d' ' -f1)
+          echo "== ZIP alignment =="
+          "$ZIPALIGN" -c -P 16 -v 4 "$APK"
+          echo "zipalign validation: OK"
+
+          echo "== APK signature =="
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          echo "APK signature validation: OK"
+
+          SHA256="$(sha256sum "$APK" | cut -d' ' -f1)"
+          SIZE_BYTES="$(stat -c '%s' "$APK")"
           test "${#SHA256}" -eq 64
+          test "$SIZE_BYTES" -gt 0
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "size_bytes=$SIZE_BYTES" >> "$GITHUB_OUTPUT"
           echo "APK SHA-256: $SHA256"
+          echo "APK size: $SIZE_BYTES bytes"
 
       - name: Prepare release asset
         shell: bash
@@ -133,21 +149,40 @@ jobs:
           fail_on_unmatched_files: true
           files: android/app/build/outputs/apk/release/arama-release.apk
 
-      - name: Verify published release asset hash
+      - name: Download and re-validate published release asset
         shell: bash
         working-directory: .
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
           VERSION_CODE: ${{ steps.version.outputs.version_code }}
-          EXPECTED_SHA256: ${{ steps.hash.outputs.sha256 }}
+          EXPECTED_SHA256: ${{ steps.validate.outputs.sha256 }}
+          EXPECTED_SIZE_BYTES: ${{ steps.validate.outputs.size_bytes }}
         run: |
           TAG="android-v${VERSION_NAME}-${VERSION_CODE}"
           rm -f /tmp/arama-release.apk
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'arama-release.apk' --dir /tmp
+          test -s /tmp/arama-release.apk
+
           ACTUAL_SHA256=$(sha256sum /tmp/arama-release.apk | cut -d' ' -f1)
+          ACTUAL_SIZE_BYTES=$(stat -c '%s' /tmp/arama-release.apk)
           test "$ACTUAL_SHA256" = "$EXPECTED_SHA256"
-          echo "Published release asset SHA-256 verified: $ACTUAL_SHA256"
+          test "$ACTUAL_SIZE_BYTES" = "$EXPECTED_SIZE_BYTES"
+
+          unzip -t /tmp/arama-release.apk >/dev/null
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 2>/dev/null | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -n 1)"
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign 2>/dev/null | sort -V | tail -n 1)"
+          BADGING="$($AAPT2 dump badging /tmp/arama-release.apk)"
+          echo "$BADGING" | grep -F "package: name='com.arama.app'" >/dev/null
+          echo "$BADGING" | grep -F "versionCode='${VERSION_CODE}'" >/dev/null
+          echo "$BADGING" | grep -F "versionName='${VERSION_NAME}'" >/dev/null
+          "$ZIPALIGN" -c -P 16 -v 4 /tmp/arama-release.apk
+          "$APKSIGNER" verify --verbose /tmp/arama-release.apk
+
+          echo "Published asset binary validation: OK"
+          echo "Published asset SHA-256: $ACTUAL_SHA256"
+          echo "Published asset size: $ACTUAL_SIZE_BYTES bytes"
 
       - name: Update OTA manifest
         shell: bash
@@ -155,7 +190,8 @@ jobs:
         env:
           VERSION_CODE: ${{ steps.version.outputs.version_code }}
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
-          SHA256: ${{ steps.hash.outputs.sha256 }}
+          SHA256: ${{ steps.validate.outputs.sha256 }}
+          SIZE_BYTES: ${{ steps.validate.outputs.size_bytes }}
         run: |
           python - <<'PY'
           import json, os
@@ -163,8 +199,10 @@ jobs:
           data = {
               'versionCode': int(os.environ['VERSION_CODE']),
               'versionName': os.environ['VERSION_NAME'],
+              'packageName': 'com.arama.app',
               'apkUrl': f"https://github.com/kanunal99-jpg/-Arama/releases/download/android-v{os.environ['VERSION_NAME']}-{os.environ['VERSION_CODE']}/arama-release.apk",
               'sha256': os.environ['SHA256'],
+              'sizeBytes': int(os.environ['SIZE_BYTES']),
               'mandatory': False,
               'releaseNotes': 'ARAMA Android otomatik OTA sürümü'
           }
@@ -189,7 +227,8 @@ jobs:
         env:
           VERSION_CODE: ${{ steps.version.outputs.version_code }}
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
-          EXPECTED_SHA256: ${{ steps.hash.outputs.sha256 }}
+          EXPECTED_SHA256: ${{ steps.validate.outputs.sha256 }}
+          EXPECTED_SIZE_BYTES: ${{ steps.validate.outputs.size_bytes }}
         run: |
           python - <<'PY'
           import json, os
@@ -197,8 +236,10 @@ jobs:
               data = json.load(f)
           assert data['versionCode'] == int(os.environ['VERSION_CODE'])
           assert data['versionName'] == os.environ['VERSION_NAME']
+          assert data['packageName'] == 'com.arama.app'
           assert data['apkUrl'].endswith('/arama-release.apk')
           assert data['sha256'] == os.environ['EXPECTED_SHA256']
+          assert data['sizeBytes'] == int(os.environ['EXPECTED_SIZE_BYTES'])
           assert len(data['sha256']) == 64
           print('OTA manifest verified:', data)
           PY
