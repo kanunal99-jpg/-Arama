@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from io import BytesIO
 from pathlib import Path
 
@@ -43,6 +44,14 @@ SKILL_ALIASES = {
 }
 
 
+def _normalize_for_match(value: str) -> str:
+    """Normalize Unicode/Turkish casing so PDF-extracted headers match aliases."""
+    normalized = unicodedata.normalize("NFKC", value or "").strip().lower()
+    normalized = normalized.replace("İ", "i").replace("ı", "i")
+    normalized = unicodedata.normalize("NFKD", normalized)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
 def _extract_text(filename: str, data: bytes) -> str:
     extension = Path(filename or "").suffix.lower()
     if extension not in SUPPORTED_EXTENSIONS:
@@ -69,8 +78,12 @@ def _first_match(pattern: str, text: str) -> str | None:
 
 
 def _is_section_header(line: str, aliases: list[str]) -> bool:
-    normalized = line.strip().lower().rstrip(":").strip()
-    return any(normalized == alias or normalized.startswith(alias + " ") for alias in aliases)
+    normalized = _normalize_for_match(line).rstrip(":").strip()
+    return any(
+        normalized == _normalize_for_match(alias)
+        or normalized.startswith(_normalize_for_match(alias) + " ")
+        for alias in aliases
+    )
 
 
 def parse_cv(filename: str, data: bytes) -> dict:
@@ -126,10 +139,10 @@ def parse_cv(filename: str, data: bytes) -> dict:
     }
 
     sections = {}
-    lower_lines = [line.lower().strip() for line in lines]
+    lower_lines = [_normalize_for_match(line) for line in lines]
     for key, aliases in section_names.items():
         indexes = [
-            i for i, line in enumerate(lower_lines)
+            i for i, line in enumerate(lines)
             if _is_section_header(line, aliases)
         ]
         if not indexes:
@@ -138,7 +151,7 @@ def parse_cv(filename: str, data: bytes) -> dict:
         start = indexes[0] + 1
         end = len(lines)
         for i in range(start, len(lines)):
-            if any(_is_section_header(lower_lines[i], values) for values in boundary_sections.values()):
+            if any(_is_section_header(lines[i], values) for values in boundary_sections.values()):
                 end = i
                 break
 
