@@ -35,6 +35,10 @@ class UpdateManager(private val activity: Activity) {
                     activity.runOnUiThread {
                         UpdateDialog.show(activity, versionName) { download(apkUrl, sha256) }
                     }
+                } else {
+                    activity.runOnUiThread {
+                        Toast.makeText(activity, "Arama güncel. Sürüm: ${manifest.optString("versionName", remoteVersion.toString())}", Toast.LENGTH_SHORT).show()
+                    }
                 }
             } catch (_: Exception) {
                 activity.runOnUiThread {
@@ -64,9 +68,7 @@ class UpdateManager(private val activity: Activity) {
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("User-Agent", "Arama-Android-OTA")
             connection.connect()
-            if (connection.responseCode !in 200..299) {
-                throw IllegalStateException("HTTP ${connection.responseCode}")
-            }
+            if (connection.responseCode !in 200..299) throw IllegalStateException("HTTP ${connection.responseCode}")
             connection.inputStream.bufferedReader().use { it.readText() }
         } finally {
             connection.disconnect()
@@ -77,17 +79,21 @@ class UpdateManager(private val activity: Activity) {
         try {
             if (android.os.Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
                 activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
-                Toast.makeText(activity, "Güncellemeyi kurmak için Arama'ya izin verin.", Toast.LENGTH_LONG).show()
+                Toast.makeText(activity, "Güncellemeyi kurmak için Arama'ya izin verin. İzin verdikten sonra Güncellemeleri Kontrol Et'e tekrar basın.", Toast.LENGTH_LONG).show()
                 return
             }
+
             val request = DownloadManager.Request(Uri.parse(apkUrl))
                 .setTitle("Arama güncellemesi")
                 .setDescription("Yeni sürüm indiriliyor…")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalFilesDir(activity, Environment.DIRECTORY_DOWNLOADS, "arama-update.apk")
                 .setMimeType("application/vnd.android.package-archive")
+
             val manager = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val id = manager.enqueue(request)
+            Toast.makeText(activity, "Arama güncellemesi indiriliyor…", Toast.LENGTH_SHORT).show()
+
             val observer = Executors.newSingleThreadExecutor()
             observer.execute {
                 var downloading = true
@@ -102,7 +108,6 @@ class UpdateManager(private val activity: Activity) {
                             status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
                         }
                         cursor.close()
-
                         if (hasRow) {
                             when (status) {
                                 DownloadManager.STATUS_SUCCESSFUL -> {
@@ -112,22 +117,37 @@ class UpdateManager(private val activity: Activity) {
                                         activity.runOnUiThread { Toast.makeText(activity, "Güncelleme dosyası bulunamadı.", Toast.LENGTH_LONG).show() }
                                     } else if (expectedSha256.isNotBlank() && !verifySha256(uri, expectedSha256)) {
                                         manager.remove(id)
-                                        activity.runOnUiThread { Toast.makeText(activity, "Güncelleme doğrulanamadı.", Toast.LENGTH_LONG).show() }
+                                        activity.runOnUiThread { Toast.makeText(activity, "Güncelleme doğrulanamadı; dosya silindi.", Toast.LENGTH_LONG).show() }
                                     } else {
                                         activity.runOnUiThread { install(uri) }
                                     }
                                 }
                                 DownloadManager.STATUS_FAILED -> {
                                     downloading = false
-                                    activity.runOnUiThread { Toast.makeText(activity, "Güncelleme indirilemedi.", Toast.LENGTH_LONG).show() }
+                                    activity.runOnUiThread {
+                                        Toast.makeText(activity, "Güncelleme indirilemedi. APK sayfası açılıyor…", Toast.LENGTH_LONG).show()
+                                        openApkUrl(apkUrl)
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                observer.shutdown()
             }
+        } catch (e: Exception) {
+            activity.runOnUiThread {
+                Toast.makeText(activity, "Güncelleme başlatılamadı: ${e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+                openApkUrl(apkUrl)
+            }
+        }
+    }
+
+    private fun openApkUrl(apkUrl: String) {
+        try {
+            activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
         } catch (_: Exception) {
-            Toast.makeText(activity, "Güncelleme başlatılamadı.", Toast.LENGTH_LONG).show()
+            Toast.makeText(activity, "APK bağlantısı açılamadı.", Toast.LENGTH_LONG).show()
         }
     }
 
