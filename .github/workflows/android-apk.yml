@@ -75,9 +75,13 @@ jobs:
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
-          jarsigner -verify -verbose -certs "$APK" >/tmp/jarsigner.txt 2>&1 || { cat /tmp/jarsigner.txt; exit 1; }
-          grep -q 'jar verified' /tmp/jarsigner.txt || { cat /tmp/jarsigner.txt; exit 1; }
-          echo "Signed release APK verified."
+          APKSIGNER="$(command -v apksigner || true)"
+          if [ -z "$APKSIGNER" ]; then
+            APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose "$APK"
+          echo "Signed release APK verified with apksigner."
 
       - name: Read Android version
         id: read-version
