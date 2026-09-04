@@ -77,6 +77,10 @@ class MainActivity : Activity() {
             showJobsScreen()
         }
 
+        val compassButton = createActionButton("Kariyer Pusulası") {
+            startActivity(Intent(this@MainActivity, CareerCompassActivity::class.java))
+        }
+
         val updateButton = createActionButton("Güncellemeleri Kontrol Et") {
             subtitle.text = "Güncellemeler kontrol ediliyor…"
             UpdateManager(this@MainActivity).checkForUpdate()
@@ -87,6 +91,7 @@ class MainActivity : Activity() {
         mainRoot.addView(subtitle, LinearLayout.LayoutParams(-1, -2))
         mainRoot.addView(cvButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 32 })
         mainRoot.addView(jobsButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
+        mainRoot.addView(compassButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
         mainRoot.addView(updateButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
 
         setContentView(mainRoot)
@@ -100,9 +105,7 @@ class MainActivity : Activity() {
             isClickable = true
             isFocusable = true
             minHeight = 56
-            setOnClickListener {
-                action()
-            }
+            setOnClickListener { action() }
         }
     }
 
@@ -113,9 +116,7 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(7, 17, 31))
         }
 
-        val backButton = createActionButton("← Ana ekrana dön") {
-            showMainScreen()
-        }
+        val backButton = createActionButton("← Ana ekrana dön") { showMainScreen() }
         root.addView(backButton, LinearLayout.LayoutParams(-1, -2))
 
         val title = TextView(this).apply {
@@ -133,7 +134,6 @@ class MainActivity : Activity() {
             setTextColor(Color.rgb(203, 213, 225))
         }
         root.addView(status, LinearLayout.LayoutParams(-1, -2))
-
         setContentView(root)
 
         executor.execute {
@@ -149,9 +149,7 @@ class MainActivity : Activity() {
                     }
                 }
             } catch (e: Exception) {
-                runOnUiThread {
-                    status.text = "İş ilanları alınamadı: ${e.message ?: "bağlantı hatası"}"
-                }
+                runOnUiThread { status.text = "İş ilanları alınamadı: ${e.message ?: "bağlantı hatası"}" }
             }
         }
     }
@@ -169,9 +167,7 @@ class MainActivity : Activity() {
             val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (status !in 200..299) throw IllegalStateException("HTTP $status")
             body
-        } finally {
-            connection.disconnect()
-        }
+        } finally { connection.disconnect() }
     }
 
     private fun openCvPicker() {
@@ -188,20 +184,14 @@ class MainActivity : Activity() {
                 "text/plain"
             ))
         }
-        try {
-            startActivityForResult(intent, PICK_CV)
-        } catch (e: Exception) {
-            showError("Dosya seçici açılamadı. ${e.message ?: "Tekrar deneyin."}")
-        }
+        try { startActivityForResult(intent, PICK_CV) }
+        catch (e: Exception) { showError("Dosya seçici açılamadı. ${e.message ?: "Tekrar deneyin."}") }
     }
 
     @Deprecated("Activity Result API migration can be done separately; this keeps minSdk compatibility simple.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == PICK_CV && resultCode == RESULT_OK) {
-            val uri = data?.data ?: return
-            analyzeCv(uri)
-        }
+        if (requestCode == PICK_CV && resultCode == RESULT_OK) data?.data?.let { analyzeCv(it) }
     }
 
     private fun analyzeCv(uri: Uri) {
@@ -211,7 +201,6 @@ class MainActivity : Activity() {
                 val resolver = contentResolver
                 val size = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
                 if (size > MAX_CV_BYTES) throw IllegalArgumentException("CV dosyası 10 MB sınırını aşıyor.")
-
                 val fileName = resolveFileName(uri)
                 val bytes = resolver.openInputStream(uri)?.use { input ->
                     val output = java.io.ByteArrayOutputStream()
@@ -225,12 +214,9 @@ class MainActivity : Activity() {
                     }
                     output.toByteArray()
                 } ?: throw IllegalArgumentException("CV dosyası okunamadı.")
-
                 val response = postMultipart(fileName, bytes)
                 runOnUiThread { showResult(response) }
-            } catch (e: Exception) {
-                runOnUiThread { showError(e.message ?: "CV analizi başarısız oldu.") }
-            }
+            } catch (e: Exception) { runOnUiThread { showError(e.message ?: "CV analizi başarısız oldu.") } }
         }
     }
 
@@ -244,7 +230,6 @@ class MainActivity : Activity() {
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
             setRequestProperty("Accept", "application/json")
         }
-
         return try {
             DataOutputStream(connection.outputStream).use { out ->
                 out.writeBytes("--$boundary\r\n")
@@ -261,9 +246,7 @@ class MainActivity : Activity() {
                 throw IllegalStateException(detail ?: "CV analizi başarısız oldu. HTTP $status")
             }
             body
-        } finally {
-            connection.disconnect()
-        }
+        } finally { connection.disconnect() }
     }
 
     private fun showResult(json: String) {
@@ -271,13 +254,10 @@ class MainActivity : Activity() {
         val name = profile?.optString("name", "-") ?: "-"
         val email = profile?.optString("email", "-") ?: "-"
         val phone = profile?.optString("phone", "-") ?: "-"
-        val skills = profile?.optJSONArray("skills")?.let { array ->
-            (0 until array.length()).joinToString(", ") { array.optString(it) }
-        }.orEmpty().ifBlank { "-" }
+        val skills = profile?.optJSONArray("skills")?.let { array -> (0 until array.length()).joinToString(", ") { array.optString(it) } }.orEmpty().ifBlank { "-" }
         val sections = profile?.optJSONObject("sections")
         val experience = sectionText(sections, "experience")
         val education = sectionText(sections, "education")
-
         val message = "Ad: $name\nE-posta: $email\nTelefon: $phone\n\nYetenekler: $skills\n\nDeneyim: $experience\n\nEğitim: $education"
         runOnUiThread { showResultScreen(message) }
     }
@@ -288,13 +268,8 @@ class MainActivity : Activity() {
     }
 
     private fun showResultScreen(message: String) {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.rgb(7, 17, 31))
-        }
-        root.addView(createActionButton("← Ana ekrana dön") { showMainScreen() }, LinearLayout.LayoutParams(-1, -2).apply {
-            setMargins(24, 24, 24, 0)
-        })
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(7, 17, 31)) }
+        root.addView(createActionButton("← Ana ekrana dön") { showMainScreen() }, LinearLayout.LayoutParams(-1, -2).apply { setMargins(24, 24, 24, 0) })
         val scroll = ScrollView(this)
         val text = TextView(this).apply {
             text = "CV ANALİZ SONUCU\n\n$message"
