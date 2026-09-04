@@ -1,5 +1,6 @@
 name: Android APK & OTA Release
 
+# Release pipeline trigger: rebuild after OTA DownloadManager managed-URI fix.
 on:
   push:
     branches: [main]
