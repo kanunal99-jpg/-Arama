@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.Settings
+import android.util.Base64
 import android.widget.Toast
 import java.net.HttpURLConnection
 import java.net.URL
@@ -16,19 +17,14 @@ import org.json.JSONObject
 
 class UpdateManager(private val activity: Activity) {
     companion object {
-        private const val MANIFEST_URL = "https://raw.githubusercontent.com/kanunal99-jpg/-Arama/main/release/latest.json"
+        private const val RAW_MANIFEST_URL = "https://raw.githubusercontent.com/kanunal99-jpg/-Arama/main/release/latest.json"
+        private const val API_MANIFEST_URL = "https://api.github.com/repos/kanunal99-jpg/-Arama/contents/release/latest.json?ref=main"
     }
 
     fun checkForUpdate() {
         Executors.newSingleThreadExecutor().execute {
             try {
-                val connection = URL(MANIFEST_URL).openConnection() as HttpURLConnection
-                connection.connectTimeout = 8000
-                connection.readTimeout = 8000
-                connection.requestMethod = "GET"
-                connection.connect()
-                if (connection.responseCode !in 200..299) return@execute
-                val json = connection.inputStream.bufferedReader().use { it.readText() }
+                val json = fetchManifest()
                 val manifest = JSONObject(json)
                 val remoteVersion = manifest.getLong("versionCode")
                 val currentVersion = activity.packageManager.getPackageInfo(activity.packageName, 0).longVersionCode
@@ -40,7 +36,40 @@ class UpdateManager(private val activity: Activity) {
                         UpdateDialog.show(activity, versionName) { download(apkUrl, sha256) }
                     }
                 }
-            } catch (_: Exception) { }
+            } catch (_: Exception) {
+                activity.runOnUiThread {
+                    Toast.makeText(activity, "Güncelleme kontrolü başarısız oldu. Tekrar deneyin.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun fetchManifest(): String {
+        return try {
+            httpGet(RAW_MANIFEST_URL)
+        } catch (_: Exception) {
+            val apiJson = httpGet(API_MANIFEST_URL)
+            val apiObject = JSONObject(apiJson)
+            val encoded = apiObject.getString("content").replace("\\s".toRegex(), "")
+            String(Base64.decode(encoded, Base64.DEFAULT), Charsets.UTF_8)
+        }
+    }
+
+    private fun httpGet(url: String): String {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        return try {
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("User-Agent", "Arama-Android-OTA")
+            connection.connect()
+            if (connection.responseCode !in 200..299) {
+                throw IllegalStateException("HTTP ${connection.responseCode}")
+            }
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
         }
     }
 
@@ -48,7 +77,7 @@ class UpdateManager(private val activity: Activity) {
         try {
             if (android.os.Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
                 activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
-                Toast.makeText(activity, "Güncellemeyi kurmak için bu kaynak için izin verin.", Toast.LENGTH_LONG).show()
+                Toast.makeText(activity, "Güncellemeyi kurmak için Arama'ya izin verin.", Toast.LENGTH_LONG).show()
                 return
             }
             val request = DownloadManager.Request(Uri.parse(apkUrl))
