@@ -37,6 +37,20 @@ jobs:
         with:
           gradle-version: '8.10'
 
+      - name: Verify production API configuration
+        shell: bash
+        env:
+          ARAMA_API_BASE_URL: ${{ secrets.ARAMA_API_BASE_URL }}
+        run: |
+          test -n "$ARAMA_API_BASE_URL" || { echo "Missing ARAMA_API_BASE_URL secret; refusing to publish a non-functional production APK."; exit 1; }
+          case "$ARAMA_API_BASE_URL" in
+            https://*) ;;
+            *) echo "ARAMA_API_BASE_URL must use HTTPS."; exit 1 ;;
+          esac
+          case "$ARAMA_API_BASE_URL" in
+            */) echo "ARAMA_API_BASE_URL must not end with /."; exit 1 ;;
+          esac
+
       - name: Verify release signing configuration
         shell: bash
         env:
@@ -65,10 +79,11 @@ jobs:
 
       - name: Build signed release APK
         env:
+          ARAMA_API_BASE_URL: ${{ secrets.ARAMA_API_BASE_URL }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle :app:assembleRelease --no-daemon -PversionCode=${{ steps.version.outputs.version_code }} -PversionName=${{ steps.version.outputs.version_name }}
+        run: gradle :app:assembleRelease --no-daemon -PversionCode=${{ steps.version.outputs.version_code }} -PversionName=${{ steps.version.outputs.version_name }} -PapiBaseUrl="$ARAMA_API_BASE_URL"
 
       - name: Verify APK exists and is signed
         shell: bash
