@@ -1,13 +1,15 @@
 package com.arama.app
 
 import android.app.Activity
-import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.util.Base64
 import android.widget.Toast
+import androidx.core.content.FileProvider
+import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -39,9 +41,9 @@ class UpdateManager(private val activity: Activity) {
                         Toast.makeText(activity, "Arama güncel. Sürüm: ${manifest.optString("versionName", remoteVersion.toString())}", Toast.LENGTH_SHORT).show()
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 activity.runOnUiThread {
-                    Toast.makeText(activity, "Güncelleme kontrolü başarısız oldu. Tekrar deneyin.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(activity, "Güncelleme kontrolü başarısız: ${e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -75,79 +77,86 @@ class UpdateManager(private val activity: Activity) {
     }
 
     private fun download(apkUrl: String, expectedSha256: String) {
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
-                activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
-                Toast.makeText(activity, "Güncellemeyi kurmak için Arama'ya izin verin. İzin verdikten sonra Güncellemeleri Kontrol Et'e tekrar basın.", Toast.LENGTH_LONG).show()
-                return
-            }
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
+            activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
+            Toast.makeText(activity, "Güncellemeyi kurmak için Arama'ya izin verin. İzin verdikten sonra tekrar kontrol edin.", Toast.LENGTH_LONG).show()
+            return
+        }
 
-            // Do not force a private destination here. DownloadManager's managed URI is
-            // readable by the package installer through FLAG_GRANT_READ_URI_PERMISSION and
-            // avoids destination/storage failures on Android 10+.
-            val request = DownloadManager.Request(Uri.parse(apkUrl))
-                .setTitle("Arama güncellemesi")
-                .setDescription("Yeni sürüm indiriliyor…")
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setAllowedOverMetered(true)
-                .setAllowedOverRoaming(false)
-                .setMimeType("application/vnd.android.package-archive")
+        activity.runOnUiThread {
+            Toast.makeText(activity, "Arama güncellemesi indiriliyor…", Toast.LENGTH_SHORT).show()
+        }
 
-            val manager = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val id = manager.enqueue(request)
-            activity.runOnUiThread {
-                Toast.makeText(activity, "Arama güncellemesi indiriliyor…", Toast.LENGTH_SHORT).show()
-            }
+        Executors.newSingleThreadExecutor().execute {
+            val updateDir = File(activity.cacheDir, "updates")
+            val apkFile = File(updateDir, "arama-update.apk")
+            try {
+                updateDir.mkdirs()
+                if (!updateDir.isDirectory) throw IllegalStateException("OTA_CACHE_DIRECTORY_UNAVAILABLE")
+                if (apkFile.exists()) apkFile.delete()
 
-            val observer = Executors.newSingleThreadExecutor()
-            observer.execute {
-                var downloading = true
-                while (downloading) {
-                    Thread.sleep(700)
-                    val cursor = manager.query(DownloadManager.Query().setFilterById(id))
-                    if (cursor != null) {
-                        var hasRow = false
-                        var status = DownloadManager.STATUS_PENDING
-                        var reason = 0
-                        if (cursor.moveToFirst()) {
-                            hasRow = true
-                            status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                            val reasonIndex = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
-                            if (reasonIndex >= 0) reason = cursor.getInt(reasonIndex)
-                        }
-                        cursor.close()
-                        if (hasRow) {
-                            when (status) {
-                                DownloadManager.STATUS_SUCCESSFUL -> {
-                                    downloading = false
-                                    val uri = manager.getUriForDownloadedFile(id)
-                                    if (uri == null) {
-                                        activity.runOnUiThread { Toast.makeText(activity, "Güncelleme dosyası bulunamadı.", Toast.LENGTH_LONG).show() }
-                                    } else if (expectedSha256.isNotBlank() && !verifySha256(uri, expectedSha256)) {
-                                        manager.remove(id)
-                                        activity.runOnUiThread { Toast.makeText(activity, "Güncelleme doğrulanamadı; dosya silindi.", Toast.LENGTH_LONG).show() }
-                                    } else {
-                                        activity.runOnUiThread { install(uri) }
-                                    }
-                                }
-                                DownloadManager.STATUS_FAILED -> {
-                                    downloading = false
-                                    activity.runOnUiThread {
-                                        Toast.makeText(activity, "Güncelleme indirilemedi (hata $reason). APK sayfası açılıyor…", Toast.LENGTH_LONG).show()
-                                        openApkUrl(apkUrl)
-                                    }
-                                }
-                            }
+                val connection = URL(apkUrl).openConnection() as HttpURLConnection
+                try {
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 30000
+                    connection.instanceFollowRedirects = true
+                    connection.requestMethod = "GET"
+                    connection.setRequestProperty("Accept", "application/vnd.android.package-archive")
+                    connection.setRequestProperty("User-Agent", "Arama-Android-OTA")
+                    connection.connect()
+                    if (connection.responseCode !in 200..299) {
+                        throw IllegalStateException("OTA_HTTP_${connection.responseCode}")
+                    }
+                    connection.inputStream.use { input ->
+                        FileOutputStream(apkFile).use { output ->
+                            input.copyTo(output, 8192)
+                            output.fd.sync()
                         }
                     }
+                } finally {
+                    connection.disconnect()
                 }
-                observer.shutdown()
+
+                if (!apkFile.isFile || apkFile.length() == 0L) throw IllegalStateException("OTA_APK_EMPTY")
+                if (expectedSha256.isNotBlank() && !verifySha256(apkFile, expectedSha256)) {
+                    apkFile.delete()
+                    throw IllegalStateException("OTA_SHA256_MISMATCH")
+                }
+
+                val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", apkFile)
+                activity.runOnUiThread { install(uri) }
+            } catch (e: Exception) {
+                apkFile.delete()
+                activity.runOnUiThread {
+                    Toast.makeText(activity, "Güncelleme indirilemedi: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+                    openApkUrl(apkUrl)
+                }
             }
-        } catch (e: Exception) {
-            activity.runOnUiThread {
-                Toast.makeText(activity, "Güncelleme başlatılamadı: ${e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
-                openApkUrl(apkUrl)
+        }
+    }
+
+    private fun verifySha256(file: File, expected: String): Boolean {
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                var count: Int
+                while (input.read(buffer).also { count = it } != -1) digest.update(buffer, 0, count)
             }
+            digest.digest().joinToString("") { "%02x".format(it) }.equals(expected.trim(), ignoreCase = true)
+        } catch (_: Exception) { false }
+    }
+
+    private fun install(uri: Uri) {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            activity.startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(activity, "APK yükleyicisi açılamadı. Ayarlardan Arama'nın bilinmeyen uygulama yükleme iznini kontrol edin.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -157,25 +166,5 @@ class UpdateManager(private val activity: Activity) {
         } catch (_: Exception) {
             Toast.makeText(activity, "APK bağlantısı açılamadı.", Toast.LENGTH_LONG).show()
         }
-    }
-
-    private fun verifySha256(uri: Uri, expected: String): Boolean {
-        return try {
-            val digest = MessageDigest.getInstance("SHA-256")
-            activity.contentResolver.openInputStream(uri)?.use { input ->
-                val buffer = ByteArray(8192)
-                var count: Int
-                while (input.read(buffer).also { count = it } != -1) digest.update(buffer, 0, count)
-            } ?: return false
-            digest.digest().joinToString("") { "%02x".format(it) }.equals(expected.trim(), ignoreCase = true)
-        } catch (_: Exception) { false }
-    }
-
-    private fun install(uri: Uri) {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        activity.startActivity(intent)
     }
 }
