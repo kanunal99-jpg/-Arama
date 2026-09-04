@@ -1,8 +1,8 @@
 {
-  "versionCode": 1,
-  "versionName": "0.1.0",
-  "apkUrl": "https://github.com/kanunal99-jpg/-Arama/releases/latest/download/arama-release.apk",
-  "sha256": "",
+  "versionCode": 100016,
+  "versionName": "0.1.16",
+  "apkUrl": "https://github.com/kanunal99-jpg/-Arama/releases/download/android-v0.1.16-100016/arama-release.apk",
+  "sha256": "878bb935dbc4b849ce292771f78afee417b8bf145e7f27cfa82cf9d2ed0a9da5",
   "mandatory": false,
-  "releaseNotes": "Arama Android başlangıç sürümü"
+  "releaseNotes": "ARAMA Android otomatik OTA sürümü"
 }
