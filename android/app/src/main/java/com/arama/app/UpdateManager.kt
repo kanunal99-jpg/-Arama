@@ -5,9 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
-import android.util.Base64
 import android.widget.Toast
-import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -56,7 +54,7 @@ class UpdateManager(private val activity: Activity) {
             val apiJson = httpGet(API_MANIFEST_URL)
             val apiObject = JSONObject(apiJson)
             val encoded = apiObject.getString("content").replace("\\s".toRegex(), "")
-            String(Base64.decode(encoded, Base64.DEFAULT), Charsets.UTF_8)
+            String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), Charsets.UTF_8)
         }
     }
 
@@ -123,8 +121,7 @@ class UpdateManager(private val activity: Activity) {
                     throw IllegalStateException("OTA_SHA256_MISMATCH")
                 }
 
-                val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", apkFile)
-                activity.runOnUiThread { install(uri) }
+                activity.runOnUiThread { installWithPackageInstaller(apkFile) }
             } catch (e: Exception) {
                 apkFile.delete()
                 activity.runOnUiThread {
@@ -147,16 +144,34 @@ class UpdateManager(private val activity: Activity) {
         } catch (_: Exception) { false }
     }
 
-    private fun install(uri: Uri) {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
+    private fun installWithPackageInstaller(apkFile: File) {
         try {
-            activity.startActivity(intent)
-        } catch (_: Exception) {
-            Toast.makeText(activity, "APK yükleyicisi açılamadı. Ayarlardan Arama'nın bilinmeyen uygulama yükleme iznini kontrol edin.", Toast.LENGTH_LONG).show()
+            val packageInstaller = activity.packageManager.packageInstaller
+            val params = android.content.pm.PackageInstaller.SessionParams(
+                android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL
+            ).apply {
+                setAppPackageName(activity.packageName)
+            }
+            val sessionId = packageInstaller.createSession(params)
+            packageInstaller.openSession(sessionId).use { session ->
+                apkFile.inputStream().use { input ->
+                    session.openWrite("base.apk", 0, apkFile.length()).use { output ->
+                        input.copyTo(output, 8192)
+                        session.fsync(output)
+                    }
+                }
+                session.commit(
+                    android.app.PendingIntent.getBroadcast(
+                        activity,
+                        sessionId,
+                        Intent(activity, OtaInstallReceiver::class.java).setData(Uri.parse("package:${activity.packageName}")),
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                    ).intentSender
+                )
+            }
+            Toast.makeText(activity, "Güncelleme doğrulandı. Android yükleyicisi açılıyor…", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(activity, "Güncelleme kurulumu başlatılamadı: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
         }
     }
 
