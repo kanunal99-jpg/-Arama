@@ -7,6 +7,7 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
+import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -24,16 +25,22 @@ class MainActivity : Activity() {
     }
 
     private lateinit var subtitle: TextView
+    private lateinit var mainRoot: LinearLayout
     private val executor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        showMainScreen()
+        UpdateManager(this).checkForUpdate()
+    }
 
-        val root = LinearLayout(this).apply {
+    private fun showMainScreen() {
+        mainRoot = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(32, 48, 32, 48)
             setBackgroundColor(Color.rgb(7, 17, 31))
+            isFocusable = true
         }
 
         val brand = TextView(this).apply {
@@ -60,33 +67,111 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
 
-        val cvButton = Button(this).apply {
-            text = "CV'ni Analiz Et"
-            isAllCaps = false
-            setOnClickListener { openCvPicker() }
+        val cvButton = createActionButton("CV'ni Analiz Et") {
+            subtitle.text = "CV dosyanı seç…"
+            openCvPicker()
         }
 
-        val jobsButton = Button(this).apply {
-            text = "İşleri Keşfet"
-            isAllCaps = false
-            setOnClickListener { subtitle.text = "İş keşfi sonraki ürün aşamasında aktifleşecek." }
+        val jobsButton = createActionButton("İşleri Keşfet") {
+            subtitle.text = "İş ilanları yükleniyor…"
+            showJobsScreen()
         }
 
-        val updateButton = Button(this).apply {
-            text = "Güncellemeleri Kontrol Et"
-            isAllCaps = false
-            setOnClickListener { UpdateManager(this@MainActivity).checkForUpdate() }
+        val updateButton = createActionButton("Güncellemeleri Kontrol Et") {
+            subtitle.text = "Güncellemeler kontrol ediliyor…"
+            UpdateManager(this@MainActivity).checkForUpdate()
         }
 
-        root.addView(brand, LinearLayout.LayoutParams(-1, -2))
+        mainRoot.addView(brand, LinearLayout.LayoutParams(-1, -2))
+        mainRoot.addView(title, LinearLayout.LayoutParams(-1, -2))
+        mainRoot.addView(subtitle, LinearLayout.LayoutParams(-1, -2))
+        mainRoot.addView(cvButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 32 })
+        mainRoot.addView(jobsButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
+        mainRoot.addView(updateButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
+
+        setContentView(mainRoot)
+    }
+
+    private fun createActionButton(label: String, action: () -> Unit): Button {
+        return Button(this).apply {
+            text = label
+            isAllCaps = false
+            isEnabled = true
+            isClickable = true
+            isFocusable = true
+            minHeight = 56
+            setOnClickListener {
+                action()
+            }
+        }
+    }
+
+    private fun showJobsScreen() {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 48, 32, 48)
+            setBackgroundColor(Color.rgb(7, 17, 31))
+        }
+
+        val backButton = createActionButton("← Ana ekrana dön") {
+            showMainScreen()
+        }
+        root.addView(backButton, LinearLayout.LayoutParams(-1, -2))
+
+        val title = TextView(this).apply {
+            text = "İŞLERİ KEŞFET"
+            textSize = 26f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            setPadding(0, 28, 0, 16)
+        }
         root.addView(title, LinearLayout.LayoutParams(-1, -2))
-        root.addView(subtitle, LinearLayout.LayoutParams(-1, -2))
-        root.addView(cvButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 32 })
-        root.addView(jobsButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
-        root.addView(updateButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8 })
+
+        val status = TextView(this).apply {
+            text = "İlanlar aranıyor…"
+            textSize = 17f
+            setTextColor(Color.rgb(203, 213, 225))
+        }
+        root.addView(status, LinearLayout.LayoutParams(-1, -2))
 
         setContentView(root)
-        UpdateManager(this).checkForUpdate()
+
+        executor.execute {
+            try {
+                val response = httpGet(BuildConfig.API_BASE_URL.trimEnd('/') + "/api/v1/jobs?limit=20")
+                val items = org.json.JSONObject(response).optJSONArray("items")
+                val count = items?.length() ?: 0
+                runOnUiThread {
+                    status.text = if (count == 0) {
+                        "Şu anda yayınlanmış iş ilanı bulunamadı. İş servisi bağlantısı aktif."
+                    } else {
+                        "Bulunan ilan sayısı: $count"
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "İş ilanları alınamadı: ${e.message ?: "bağlantı hatası"}"
+                }
+            }
+        }
+    }
+
+    private fun httpGet(url: String): String {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 15000
+            setRequestProperty("Accept", "application/json")
+        }
+        return try {
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) throw IllegalStateException("HTTP $status")
+            body
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun openCvPicker() {
@@ -103,7 +188,11 @@ class MainActivity : Activity() {
                 "text/plain"
             ))
         }
-        startActivityForResult(intent, PICK_CV)
+        try {
+            startActivityForResult(intent, PICK_CV)
+        } catch (e: Exception) {
+            showError("Dosya seçici açılamadı. ${e.message ?: "Tekrar deneyin."}")
+        }
     }
 
     @Deprecated("Activity Result API migration can be done separately; this keeps minSdk compatibility simple.")
@@ -199,15 +288,23 @@ class MainActivity : Activity() {
     }
 
     private fun showResultScreen(message: String) {
-        val scroll = ScrollView(this).apply { setBackgroundColor(Color.rgb(7, 17, 31)) }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(7, 17, 31))
+        }
+        root.addView(createActionButton("← Ana ekrana dön") { showMainScreen() }, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(24, 24, 24, 0)
+        })
+        val scroll = ScrollView(this)
         val text = TextView(this).apply {
             text = "CV ANALİZ SONUCU\n\n$message"
             textSize = 16f
             setTextColor(Color.WHITE)
-            setPadding(32, 48, 32, 48)
+            setPadding(32, 32, 32, 48)
         }
         scroll.addView(text)
-        setContentView(scroll)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
         subtitle = text
     }
 
