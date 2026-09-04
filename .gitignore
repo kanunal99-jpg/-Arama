@@ -1,0 +1,4 @@
+
+# Android release signing keystore
+android/app/release-keystore.p12
+android/app/release-keystore.jks

@@ -17,8 +17,9 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystore = file("release-keystore.jks")
+            val keystore = file("release-keystore.p12")
             storeFile = keystore
+            storeType = "PKCS12"
             storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
             keyAlias = System.getenv("ANDROID_KEY_ALIAS")
             keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
