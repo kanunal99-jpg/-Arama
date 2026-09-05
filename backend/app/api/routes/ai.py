@@ -35,10 +35,20 @@ def profile_analysis():
 def career_path(payload: CareerPathRequest):
     return {"target_role": payload.target_role, "status": "career-engine-pending"}
 
+@router.get("/health")
+def ai_health():
+    from app.services.ai_career_analysis import verify_openai_connection
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY eksik.")
+    try:
+        return verify_openai_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="OpenAI bağlantı testi başarısız.") from exc
+
 @router.post("/career-analysis")
 def career_analysis(payload: CareerAnalysisRequest):
     if not settings.openai_api_key:
-        raise HTTPException(status_code=503, detail="AI servisi yapılandırılmamış.")
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY eksik.")
     from app.services.ai_career_analysis import generate_career_analysis
     try:
         return {"status": "analyzed", "analysis": generate_career_analysis(payload.target_role, payload.profile)}
