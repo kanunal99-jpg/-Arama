@@ -1,0 +1,86 @@
+name: Production AI Smoke Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/app/api/routes/ai.py'
+      - 'backend/app/services/ai_career_analysis.py'
+      - '.github/workflows/production-ai-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  production-ai:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify production AI health
+        env:
+          BASE_URL: https://arama-dglv.onrender.com
+        run: |
+          set -euo pipefail
+          for i in {1..12}; do
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 60 "$BASE_URL/api/v1/ai/health" || true)
+            echo "Health attempt $i: HTTP $code"
+            cat /tmp/health.json || true
+            if [ "$code" = "200" ]; then
+              python - <<'PY'
+          import json
+          data=json.load(open('/tmp/health.json'))
+          assert data.get('connected') is True
+          assert data.get('response','').upper() == 'OK'
+          print('OpenAI production health: PASS', data.get('model'))
+          PY
+              break
+            fi
+            if [ "$i" = "12" ]; then exit 1; fi
+            sleep 10
+          done
+
+      - name: Run real production career analysis
+        env:
+          BASE_URL: https://arama-dglv.onrender.com
+        run: |
+          set -euo pipefail
+          cat > /tmp/payload.json <<'JSON'
+          {
+            "target_role": "Satış Süpervizörü",
+            "profile": {
+              "summary": "FMCG satış ve saha yönetimi deneyimi",
+              "years_experience": 10,
+              "skills": ["satış yönetimi", "ekip yönetimi", "saha operasyonu", "müşteri yönetimi"],
+              "experience": [
+                {"role": "Satış Yöneticisi", "industry": "FMCG", "achievements": ["ekip yönetimi", "saha performans takibi"]}
+              ]
+            }
+          }
+          JSON
+          for i in {1..12}; do
+            code=$(curl -sS -o /tmp/analysis.json -w '%{http_code}' --max-time 90 \
+              -H 'Content-Type: application/json' \
+              -X POST "$BASE_URL/api/v1/ai/career-analysis" \
+              --data-binary @/tmp/payload.json || true)
+            echo "Career analysis attempt $i: HTTP $code"
+            cat /tmp/analysis.json || true
+            if [ "$code" = "200" ]; then
+              python - <<'PY'
+          import json
+          data=json.load(open('/tmp/analysis.json'))
+          assert data.get('status') == 'analyzed'
+          analysis=data.get('analysis')
+          assert isinstance(analysis, dict)
+          required=['summary','role_fit_score','role_fit_reason','strengths','skill_gaps','recommended_roles','actions','roadmap_30_60_90','evidence','disclaimer']
+          missing=[k for k in required if k not in analysis]
+          assert not missing, missing
+          assert 0 <= float(analysis['role_fit_score']) <= 100
+          assert isinstance(analysis['strengths'], list)
+          assert isinstance(analysis['skill_gaps'], list)
+          assert isinstance(analysis['roadmap_30_60_90'], dict)
+          print('REAL production career analysis: PASS')
+          print('role_fit_score=', analysis['role_fit_score'])
+          print('summary=', analysis['summary'])
+          PY
+              break
+            fi
+            if [ "$i" = "12" ]; then exit 1; fi
+            sleep 10
+          done
