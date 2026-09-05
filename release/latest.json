@@ -1,9 +1,9 @@
 {
-  "versionCode": 100059,
-  "versionName": "0.1.59",
+  "versionCode": 100061,
+  "versionName": "0.1.61",
   "packageName": "com.arama.app",
-  "apkUrl": "https://github.com/kanunal99-jpg/-Arama/releases/download/android-v0.1.59-100059/arama-release.apk",
-  "sha256": "48caaeadbc4596d571aea40fb14a3dd98bbef4d01fb6401deb0deab9df5678db",
+  "apkUrl": "https://github.com/kanunal99-jpg/-Arama/releases/download/android-v0.1.61-100061/arama-release.apk",
+  "sha256": "faee18066f6334c26a5f6c0551adfcf7f72e416ee51358bc6fa99f7d5f2a5f8d",
   "sizeBytes": 644981,
   "mandatory": false,
   "releaseNotes": "ARAMA Android otomatik OTA sürümü"
